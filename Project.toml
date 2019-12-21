@@ -3,6 +3,9 @@ uuid = "27a7c9a6-6ec3-4af6-92ae-cc2b9dc1d14d"
 authors = ["Carl Morris <carl.morris.world@outlook.com>"]
 version = "0.1.0"
 
+[deps]
+Tokenize = "0796e94c-ce3b-5d07-9a54-7f471281c624"
+
 [compat]
 julia = "1"
 
