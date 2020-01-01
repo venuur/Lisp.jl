@@ -4,9 +4,6 @@ using Tokenize
 
 export tokenize, read_sexp, Token
 
-const INTEGER = Tokens.INTEGER
-const FLOAT = Tokens.FLOAT
-const STRING = Tokens.STRING
 const OP = Tokens.OP
 
 const LPAREN = Tokens.LPAREN
@@ -14,6 +11,20 @@ const RPAREN = Tokens.RPAREN
 
 const LSQUARE = Tokens.LSQUARE  # [
 const RSQUARE = Tokens.RSQUARE  # ]
+
+const INTEGER = Tokens.INTEGER
+const FLOAT = Tokens.FLOAT
+const STRING = Tokens.STRING
+const CHAR = Tokens.CHAR
+
+const LITERAL_KINDS = Base.IdSet{Tokens.Kind}([
+    INTEGER,
+    FLOAT,
+    STRING,
+    CHAR,
+])
+
+isliteral(t) = Tokens.kind(t) ∈ LITERAL_KINDS
 
 const WHITESPACE = Tokens.WHITESPACE
 const EQ = Tokens.EQ # =
@@ -37,14 +48,6 @@ const EX_OR_EQ = Tokens.EX_OR_EQ # $=
 const XOR_EQ = Tokens.XOR_EQ # ⊻=
 const LAZY_AND = Tokens.LAZY_AND # &&
 const LAZY_OR = Tokens.LAZY_OR # ||
-
-const LITERAL_KINDS = Base.IdSet{Tokens.Kind}([
-    INTEGER,
-    FLOAT,
-    STRING,
-])
-
-isliteral(t) = Tokens.kind(t) ∈ LITERAL_KINDS
 
 const OPEQUAL_EXACTKINDS = Base.IdSet{Tokens.Kind}([
     PLUS_EQ, # +=
@@ -300,14 +303,16 @@ end
 function parse_equal(form)
     @assert value(form[1]) === :(=)
     @assert length(form) > 2
+    @show "equal" form
 
-    if form[2] isa Vector
+    if (form[2] isa Vector) && (value(form[2][1]) !== :ref)
         # special case of function definition
         _make_function(form)
     else
         @assert length(form) == 3
+        destination = parse_sexp(form[2])
         assignment_value = parse_sexp(form[3])
-        return Expr(value(form[1]), value(form[2]), assignment_value)
+        return Expr(value(form[1]), destination, assignment_value)
     end
 end
 
