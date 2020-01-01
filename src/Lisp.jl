@@ -168,6 +168,8 @@ function parse_sexp(form::Vector)
         return parse_for(form)
     elseif head === :ref
         return parse_ref(form)
+    elseif head === :return
+        return parse_return(form)
     elseif head === :.
         return parse_dotcall(form)
     elseif head === :(=)
@@ -383,6 +385,13 @@ function parse_for(form::Vector)
         itr = make_itr(form[2])
         return Expr(head, itr, Expr(:block, body...))
     end
+end
+
+function parse_return(form::Vector)
+    # TODO handle multiple return values
+    @assert value(form[1]) === :return
+    ret = parse_sexp(form[2])
+    Expr(value(form[1]), ret)
 end
 
 ################################################################
