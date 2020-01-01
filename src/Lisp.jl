@@ -11,12 +11,58 @@ const OP = Tokens.OP
 const LPAREN = Tokens.LPAREN
 const RPAREN = Tokens.RPAREN
 const WHITESPACE = Tokens.WHITESPACE
+const EQ = Tokens.EQ # =
+const PLUS_EQ = Tokens.PLUS_EQ # +=
+const MINUS_EQ = Tokens.MINUS_EQ # -=
+const STAR_EQ = Tokens.STAR_EQ # *=
+const FWD_SLASH_EQ = Tokens.FWD_SLASH_EQ # /=
+const FWDFWD_SLASH_EQ = Tokens.FWDFWD_SLASH_EQ # //=
+const OR_EQ = Tokens.OR_EQ # |=
+const CIRCUMFLEX_EQ = Tokens.CIRCUMFLEX_EQ # ^=
+const DIVISION_EQ = Tokens.DIVISION_EQ # ÷=
+const REM_EQ = Tokens.REM_EQ # %=
+const LBITSHIFT_EQ = Tokens.LBITSHIFT_EQ # <<=
+const RBITSHIFT_EQ = Tokens.RBITSHIFT_EQ # >>=
+const UNSIGNED_BITSHIFT_EQ = Tokens.UNSIGNED_BITSHIFT_EQ # >>>=
+const BACKSLASH_EQ = Tokens.BACKSLASH_EQ # \=
+const AND_EQ = Tokens.AND_EQ # &=
+const COLON_EQ = Tokens.COLON_EQ # :=
+const APPROX = Tokens.APPROX # ~
+const EX_OR_EQ = Tokens.EX_OR_EQ # $=
+const XOR_EQ = Tokens.XOR_EQ # ⊻=
+const LAZY_AND = Tokens.LAZY_AND # &&
+const LAZY_OR = Tokens.LAZY_OR # ||
 
-function isliteral(t)
-    (Tokens.kind(t) === INTEGER
-     || Tokens.kind(t) === FLOAT
-     || Tokens.kind(t) === STRING)
-end
+const LITERAL_KINDS = Base.IdSet{Tokens.Kind}([
+    INTEGER,
+    FLOAT,
+    STRING,
+])
+
+isliteral(t) = Tokens.kind(t) ∈ LITERAL_KINDS
+
+const OPEQUAL_EXACTKINDS = Base.IdSet{Tokens.Kind}([
+    PLUS_EQ, # +=
+    MINUS_EQ, # -=
+    STAR_EQ, # *=
+    FWD_SLASH_EQ, # /=
+    FWDFWD_SLASH_EQ, # //=
+    OR_EQ, # |=
+    CIRCUMFLEX_EQ, # ^=
+    DIVISION_EQ, # ÷=
+    REM_EQ, # %=
+    LBITSHIFT_EQ, # <<=
+    RBITSHIFT_EQ, # >>=
+    UNSIGNED_BITSHIFT_EQ, # >>>=
+    BACKSLASH_EQ, # \=
+    AND_EQ, # &=
+    COLON_EQ, # :=
+    EX_OR_EQ, # $=
+    XOR_EQ, # ⊻=
+])
+
+isopequal(t::Token) = exactkind(t) ∈ OPEQUAL_EXACTKINDS
+islazy(t::Token) = exactkind(t) === LAZY_AND || exactkind(t) === LAZY_OR
 
 struct Token
     value
@@ -35,6 +81,7 @@ end
 value(t::Token) = t.value
 token(t::Token) = t.token
 kind(t::Token) = Tokens.kind(t.token)
+exactkind(t::Token) = Tokens.exactkind(t.token)
 
 Base.show(io::IO, t::Token) = show(io, value(t))
 
