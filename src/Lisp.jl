@@ -2,7 +2,7 @@ module Lisp
 
 using Tokenize
 
-export tokenize, parse_sexp, Token
+export tokenize, read_sexp, Token
 
 const INTEGER = Tokens.INTEGER
 const FLOAT = Tokens.FLOAT
@@ -89,7 +89,7 @@ Base.show(io::IO, t::Token) = show(io, value(t))
 """
 Chunk string `s` into sections delimited by parentheses.
 """
-function parse_sexp(s)
+function read_sexp(s)
     forms = []
     form_stack = []
     current_form = forms
@@ -114,92 +114,242 @@ end
 ################################################################
 # forms to julia expr
 
-export eval_sexp, eval_function, eval_op
+export parse_sexp, parse_function, parse_op
 
-function eval_sexp(form::Vector)
+function parse_sexp(form::Vector)
     @show "form" form
+    head = value(form[1])
     if length(form) == 0
         return form
-    elseif value(form[1]) === :function
-        return eval_function(form)
-    elseif value(form[1]) === :(=)
-        return eval_equal(form)
+    elseif head === :function
+        return parse_function(form)
+    elseif head === :using
+        return parse_using(form)
+    elseif head === :while
+        return parse_while(form)
+    elseif head === :for
+        return parse_for(form)
+    elseif head === :.
+        return parse_dotcall(form)
+    elseif head === :(=)
+        return parse_equal(form)
+    elseif head === :(:)
+        return parse_range(form)
+    elseif isopequal(form[1])
+        return parse_opequal(form)
+    elseif islazy(form[1])
+        return parse_lazyop(form)
     elseif kind(form[1]) === OP
-        return eval_op(form)
-    else
-        @show form
-        return cat([:UNKNOWN], form, dims=1)
+        return parse_op(form)
+    else  # must be a function call
+        return parse_call(form)
     end
 end
 
-function eval_sexp(form::Token)
-    return value(form)
+function parse_sexp(form::Token)
+    if value(form) === :break
+        return Expr(:break)
+    else
+        return value(form)
+    end
 end
 
-function eval_function(form::Vector)
+"""
+Parse
+
+    (function (f <formals>) body<...>)
+
+into
+
+    function f(<formals>)
+        body
+        <...>
+    end
+
+"""
+function parse_function(form::Vector)
     @assert value(form[1]) === :function
     @assert form[2] isa Vector
     @assert length(form) > 2
-    body = [eval_sexp(f) for f in form[3:end]]
+    _make_function(form)
+end
+
+function _make_function(form::Vector)
+    body = [parse_sexp(f) for f in form[3:end]]
     Expr(
         value(form[1]),
         Expr(:call, value.(form[2])...),
-        [Expr(:block, b) for b in body]...)
+        Expr(:block, body...))
 end
 
-function eval_op(form::Vector)
+function parse_using(form::Vector)
+    @assert value(form[1]) === :using
+    @assert length(form) > 1
+
+    # TODO support `using Mod: name1`
+    # TODO support `using ..Mod` for submodules
+    make_module(sym) = Expr(:., sym)
+
+    modules = make_module.(value.(form[2:end]))
+    Expr(value(form[1]), modules...)
+end
+
+"""
+Parse
+
+    (f <args...>)
+
+into
+
+    f(<args...>)
+
+"""
+function parse_call(form::Vector)
+    args = [parse_sexp(f) for f in form[2:end]]
+    Expr(:call, value(form[1]), args...)
+end
+
+"""
+Parse
+
+    (. f <args...>)
+
+into
+
+    f.(<args...>)
+
+"""
+function parse_dotcall(form::Vector)
+    @assert length(form) > 1
+    args = [parse_sexp(f) for f in form[3:end]]
+    Expr(value(form[1]), value(form[2]), Expr(:tuple, args...))
+end
+
+function parse_op(form::Vector)
     @assert kind(form[1]) === OP
     @assert length(form) > 1
 
     call_op(xs...) = Expr(:call, value(form[1]), xs...)
-    
+
     if length(form) == 2
         # unary
-        arg = eval_sexp(form[2])
+        arg = parse_sexp(form[2])
         return Expr(:call, form[1], arg)
     else
         # TODO handle ternary operator
         # TODO handle right associative
-        # binary, so fold left
-        args = [eval_sexp(f) for f in form[2:end]]
-        return foldl(call_op, args[3:end], init=call_op(args[1], args[2]))
+        # binary, so fold
+        args = [parse_sexp(f) for f in form[2:end]]
+        return foldr(call_op, args)
     end
 end
 
-function eval_equal(form)
+function parse_equal(form)
     @assert value(form[1]) === :(=)
     @assert length(form) > 2
-    
+
     if form[2] isa Vector
         # special case of function definition
-        body = [eval_sexp(f) for f in form[3:end]]
-        return Expr(
-            value(form[1]),
-            Expr(:call, value.(form[2])...),
-            [Expr(:block, b) for b in body]...)
+        _make_function(form)
     else
         @assert length(form) == 3
-        assignment_value = eval_sexp(form[3])
+        assignment_value = parse_sexp(form[3])
         return Expr(value(form[1]), value(form[2]), assignment_value)
+    end
+end
+
+parse_range(form::Vector) = parse_call(form)
+
+function parse_opequal(form::Vector)
+    @assert isopequal(form[1])
+    @assert length(form) == 3
+    op = value(form[1])
+    lhs = value(form[2])
+    rhs = parse_sexp(form[3])
+    Expr(op, lhs, rhs)
+end
+
+function parse_lazyop(form::Vector)
+    @assert islazy(form[1])
+    @assert length(form) > 2
+    op = value(form[1])
+    call_op(lhs, rhs) = Expr(op, lhs, rhs)
+    args = [parse_sexp(f) for f in form[2:end]]
+    return foldr(call_op, args)
+end
+
+function parse_while(form::Vector)
+    @assert value(form[1]) === :while
+    @assert length(form) > 2
+    condition = parse_sexp(form[2])
+    body = [parse_sexp(f) for f in form[3:end]]
+    Expr(:while, condition, Expr(:block, body...))
+end
+
+"""
+Convert
+
+    (for (i itr) body)
+
+into
+
+    for i = itr
+        body
+    end
+
+and
+
+    (for ((i itr1) (j itr2)) body)
+
+into
+
+    for i = itr1, j = itr2
+        body
+    end
+
+"""
+function parse_for(form::Vector)
+    @assert value(form[1]) === :for
+    @assert length(form) > 2
+
+    make_itr(form) = Expr(:(=), value(form[1]), parse_sexp(form[2]))
+
+    head = value(form[1])
+    body = parse_sexp.(form[3:end])
+    if form[2][1] isa Vector
+        # multiple iterators
+        itrs = make_itr.(form[2])
+        return Expr(head, Expr(:block, itrs...), Expr(:block, body...))
+    else
+        # single iterator
+        itr = make_itr(form[2])
+        return Expr(head, itr, Expr(:block, body...))
     end
 end
 
 ################################################################
 # loading code
-export include_stringl
+export include_stringl, includel
 function include_stringl(mod, str)
-    for s in parse_sexp(str)
-        expr = eval_sexp(s)
+    for s in read_sexp(str)
+        expr = parse_sexp(s)
         @show expr
         Base.eval(mod, expr)
     end
 end
 
+function includel(mod, filename)
+    open(filename, "r") do source_file
+        source = read(source_file, String)
+        include_stringl(mod, source)
+    end
+end
+
 ################################################################
 # utilities for testing
-export dump_sexp, parse_eval_sexp
+export dump_sexp, parse_sexp_string
 
-dump_sexp(sexp_str) = dump(eval_sexp(parse_sexp(sexp_str)[1]))
-parse_eval_sexp(sexp_str) = eval_sexp(parse_sexp(sexp_str)[1])
+dump_sexp(sexp_str) = dump(parse_sexp(read_sexp(sexp_str)[1]))
+parse_sexp_string(sexp_str) = parse_sexp(read_sexp(sexp_str)[1])
 
 end # module
