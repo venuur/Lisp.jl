@@ -8,8 +8,13 @@ const INTEGER = Tokens.INTEGER
 const FLOAT = Tokens.FLOAT
 const STRING = Tokens.STRING
 const OP = Tokens.OP
+
 const LPAREN = Tokens.LPAREN
 const RPAREN = Tokens.RPAREN
+
+const LSQUARE = Tokens.LSQUARE  # [
+const RSQUARE = Tokens.RSQUARE  # ]
+
 const WHITESPACE = Tokens.WHITESPACE
 const EQ = Tokens.EQ # =
 const PLUS_EQ = Tokens.PLUS_EQ # +=
@@ -60,13 +65,12 @@ const OPEQUAL_EXACTKINDS = Base.IdSet{Tokens.Kind}([
     EX_OR_EQ, # $=
     XOR_EQ, # ⊻=
 ])
-
-isopequal(t::Token) = exactkind(t) ∈ OPEQUAL_EXACTKINDS
-islazy(t::Token) = exactkind(t) === LAZY_AND || exactkind(t) === LAZY_OR
-
 struct Token
     value
     token
+    function Token(t::Symbol)
+        new(t, nothing)
+    end
     function Token(t)
         t_str = untokenize(t)
         if isliteral(t)
@@ -82,30 +86,60 @@ value(t::Token) = t.value
 token(t::Token) = t.token
 kind(t::Token) = Tokens.kind(t.token)
 exactkind(t::Token) = Tokens.exactkind(t.token)
+startpos(t::Token) = Tokens.startpos(t.token)
+isopequal(t::Token) = exactkind(t) ∈ OPEQUAL_EXACTKINDS
+islazy(t::Token) = exactkind(t) === LAZY_AND || exactkind(t) === LAZY_OR
+
 
 Base.show(io::IO, t::Token) = show(io, value(t))
 
-
 """
-Chunk string `s` into sections delimited by parentheses.
+Chunk string `s` into sections delimited by parentheses and brackets.
 """
 function read_sexp(s)
     forms = []
     form_stack = []
     current_form = forms
+    kind_stack = Tokens.Kind[]
     for t in tokenize(s)
         if Tokens.kind(t) === LPAREN
+            push!(kind_stack, LPAREN)
             push!(current_form, [])
             push!(form_stack, current_form)
             current_form = current_form[end]
             continue
         elseif Tokens.kind(t) === RPAREN
+            top_kind = pop!(kind_stack)
+            if top_kind !== LPAREN
+                (line, col) = Tokens.startpos(t)
+                msg = """
+                    Encountered unexpected '$(untokenize(t))' at
+                    line $(line) and column $(col)"""
+                throw(DomainError(s, msg))
+            end
+            current_form = pop!(form_stack)
+        elseif Tokens.kind(t) === LSQUARE
+            push!(kind_stack, LSQUARE)
+            push!(current_form, Any[Token(:ref)])
+            push!(form_stack, current_form)
+            current_form = current_form[end]
+            continue
+        elseif Tokens.kind(t) === RSQUARE
+            top_kind = pop!(kind_stack)
+            if top_kind !== LSQUARE
+                (line, col) = Tokens.startpos(t)
+                msg = """
+                    Encountered unexpected '$(untokenize(t))' at
+                    line $(line) and column $(col)"""
+                throw(DomainError(s, msg))
+            end
             current_form = pop!(form_stack)
         elseif Tokens.kind(t) === WHITESPACE
             continue
         else
             push!(current_form, Token(t))
         end
+
     end
     # strip empty form from trailing ENDMARKER token
     forms[1:end-1]
@@ -129,6 +163,8 @@ function parse_sexp(form::Vector)
         return parse_while(form)
     elseif head === :for
         return parse_for(form)
+    elseif head === :ref
+        return parse_ref(form)
     elseif head === :.
         return parse_dotcall(form)
     elseif head === :(=)
@@ -205,8 +241,25 @@ into
 
 """
 function parse_call(form::Vector)
+    head = parse_sexp(form[1])
     args = [parse_sexp(f) for f in form[2:end]]
-    Expr(:call, value(form[1]), args...)
+    Expr(:call, head, args...)
+end
+
+"""
+Parse
+
+    [f <indices...>]
+
+into
+
+    f[<indices...>]
+
+"""
+function parse_ref(form::Vector)
+    head = parse_sexp(form[2])
+    indices = [parse_sexp(f) for f in form[3:end]]
+    Expr(:ref, head, indices...)
 end
 
 """
@@ -351,5 +404,4 @@ export dump_sexp, parse_sexp_string
 
 dump_sexp(sexp_str) = dump(parse_sexp(read_sexp(sexp_str)[1]))
 parse_sexp_string(sexp_str) = parse_sexp(read_sexp(sexp_str)[1])
-
 end # module
