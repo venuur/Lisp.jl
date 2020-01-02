@@ -170,6 +170,10 @@ function parse_sexp(form::Vector)
         return parse_ref(form)
     elseif head === :return
         return parse_return(form)
+    elseif head === :module || head === :baremodule
+        return parse_module(form)
+    elseif head === :do
+        return parse_do(form)
     elseif head === :.
         return parse_dotcall(form)
     elseif head === :(=)
@@ -388,10 +392,52 @@ function parse_for(form::Vector)
 end
 
 function parse_return(form::Vector)
-    # TODO handle multiple return values
     @assert value(form[1]) === :return
-    ret = parse_sexp(form[2])
-    Expr(value(form[1]), ret)
+    if length(form) == 2
+        ret = parse_sexp(form[2])
+        Expr(value(form[1]), ret)
+    else  # length(form) > 2
+        ret = Expr(:tuple, parse_sexp.(form[2:end])...)
+        Expr(value(form[1]), ret)
+    end
+end
+
+function parse_module(form::Vector)
+    @assert value(form[1]) === :module || value(form[1]) === :baremodule
+    @assert length(form) > 1
+    function make_module(form, import_base)
+        Expr(:module, import_base, value(form[2]), Expr(:block, body...))
+    end
+
+    body = parse_sexp.(form[3:end])
+    if value(form[1]) === :module
+        make_module(form, true)
+    else  # baremodule
+        make_module(form, false)
+    end
+end
+
+"""
+Parse
+
+    (do (f <args...>) (<formals...>) <body...>)
+
+into
+
+    do f(<args...>) <formals...>
+        <body...>
+    end
+
+"""
+function parse_do(form::Vector)
+    head = value(form[1])
+    @assert head === :do
+    @assert length(form) > 3
+
+    func = parse_sexp(form[2])
+    formals = Expr(:tuple, value.(form[3])...)
+    body = parse_sexp.(form[4:end])
+    Expr(head, func, Expr(:->, formals, Expr(:block, body...)))
 end
 
 ################################################################
@@ -418,4 +464,5 @@ export dump_sexp, parse_sexp_string
 
 dump_sexp(sexp_str) = dump(parse_sexp(read_sexp(sexp_str)[1]))
 parse_sexp_string(sexp_str) = parse_sexp(read_sexp(sexp_str)[1])
+
 end # module
