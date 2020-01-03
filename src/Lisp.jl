@@ -1,6 +1,7 @@
 module Lisp
 
 using Tokenize
+using ReplMaker: initrepl
 
 export tokenize, read_sexp, Token
 
@@ -155,10 +156,14 @@ export parse_sexp, parse_function, parse_op
 
 function parse_sexp(form::Vector)
     @show "form" form
-    head = value(form[1])
     if length(form) == 0
         return form
-    elseif head === :function
+    elseif form[1] isa Vector
+        return parse_call(form)
+    end
+
+    head = value(form[1])
+    if head === :function
         return parse_function(form)
     elseif head === :using
         return parse_using(form)
@@ -172,6 +177,8 @@ function parse_sexp(form::Vector)
         return parse_return(form)
     elseif head === :module || head === :baremodule
         return parse_module(form)
+    elseif head === :struct || head === :mutable
+        return parse_struct(form)
     elseif head === :do
         return parse_do(form)
     elseif head === :.
@@ -220,11 +227,10 @@ function parse_function(form::Vector)
 end
 
 function _make_function(form::Vector)
-    body = [parse_sexp(f) for f in form[3:end]]
     Expr(
         value(form[1]),
-        Expr(:call, value.(form[2])...),
-        Expr(:block, body...))
+        Expr(:call, parse_sexp.(form[2])...),
+        Expr(:block, parse_sexp.(form[3:end])...))
 end
 
 function parse_using(form::Vector)
@@ -264,11 +270,39 @@ into
 
     f[<indices...>]
 
+and
+
+    [. x y <attributes...>]
+
+into
+
+    x.y<.<attributes...>>
+
+and
+
+    [:: x y <types...>]
+
+into
+
+    x::y<::<types...>>
+
 """
 function parse_ref(form::Vector)
     head = parse_sexp(form[2])
-    indices = [parse_sexp(f) for f in form[3:end]]
-    Expr(:ref, head, indices...)
+    if head === :.
+        function make_getfield(x, y)
+            return Expr(:., x, QuoteNode(y))
+        end
+        return foldl(make_getfield, parse_sexp.(form[3:end]))
+    elseif head === :(::)
+        function make_annotation(x, y)
+            return Expr(:(::), x, y)
+        end
+        return foldl(make_annotation, parse_sexp.(form[3:end]))
+    else  # array indexing
+        indices = [parse_sexp(f) for f in form[3:end]]
+        return Expr(:ref, head, indices...)
+    end
 end
 
 """
@@ -406,15 +440,32 @@ function parse_module(form::Vector)
     @assert value(form[1]) === :module || value(form[1]) === :baremodule
     @assert length(form) > 1
     function make_module(form, import_base)
+        body = parse_sexp.(form[3:end])
         Expr(:module, import_base, value(form[2]), Expr(:block, body...))
     end
 
-    body = parse_sexp.(form[3:end])
     if value(form[1]) === :module
         make_module(form, true)
     else  # baremodule
         make_module(form, false)
     end
+end
+
+function parse_struct(form::Vector)
+    head = value(form[1])
+    @assert (
+        head === :struct || (head === :mutable && value(form[2]) === :struct))
+    @assert length(form) > 1
+
+    function make_struct(form, is_mutable, name, body)
+        Expr(:struct, is_mutable, name, Expr(:block, body...))
+    end
+
+    is_mutable = head === :mutable
+    name_index = is_mutable ? 3 : 2
+    name = value(form[name_index])
+    body = parse_sexp.(form[(name_index + 1):end])
+    return make_struct(form, is_mutable, name, body)
 end
 
 """
@@ -460,9 +511,17 @@ end
 
 ################################################################
 # utilities for testing
-export dump_sexp, parse_sexp_string
+export dump_sexp, parse_sexp_string, enable_repl
 
 dump_sexp(sexp_str) = dump(parse_sexp(read_sexp(sexp_str)[1]))
 parse_sexp_string(sexp_str) = parse_sexp(read_sexp(sexp_str)[1])
+function enable_repl()
+    initrepl(parse_sexp_string;
+        prompt_text="jlisp>",
+        prompt_color=:blue,
+        start_key=')',
+        mode_name="JLisp_mode",
+    )
+end
 
 end # module
