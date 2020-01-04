@@ -542,7 +542,7 @@ dump_sexp(sexp_str) = dump(parse_sexp(read_sexp(sexp_str)[1]))
 parse_sexp_string(sexp_str) = parse_sexp(read_sexp(sexp_str)[1])
 function enable_repl()
     initrepl(parse_sexp_string;
-        prompt_text="jlisp>",
+        prompt_text="jlisp> ",
         prompt_color=:blue,
         start_key=')',
         mode_name="JLisp_mode",
