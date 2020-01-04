@@ -4,6 +4,7 @@ authors = ["Carl Morris <carl.morris.world@outlook.com>"]
 version = "0.1.0"
 
 [deps]
+ReplMaker = "b873ce64-0db9-51f5-a568-4457d8e49576"
 Tokenize = "0796e94c-ce3b-5d07-9a54-7f471281c624"
 
 [compat]
