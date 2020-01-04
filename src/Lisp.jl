@@ -355,7 +355,7 @@ function parse_op(form::Vector)
     if length(form) == 2
         # unary
         arg = parse_sexp(form[2])
-        return Expr(:call, form[1], arg)
+        return call_op(parse_sexp(form[2]))
     else
         # TODO handle ternary operator
         # TODO handle right associative
