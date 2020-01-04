@@ -13,6 +13,8 @@ const RPAREN = Tokens.RPAREN
 const LSQUARE = Tokens.LSQUARE  # [
 const RSQUARE = Tokens.RSQUARE  # ]
 
+const AT_SIGN = Tokens.AT_SIGN
+
 const INTEGER = Tokens.INTEGER
 const FLOAT = Tokens.FLOAT
 const STRING = Tokens.STRING
@@ -193,6 +195,8 @@ function parse_sexp(form::Vector)
         return parse_lazyop(form)
     elseif kind(form[1]) === OP
         return parse_op(form)
+    elseif kind(form[1]) === AT_SIGN
+        return parse_macrocall(form)
     else  # must be a function call
         return parse_call(form)
     end
@@ -259,6 +263,27 @@ function parse_call(form::Vector)
     head = parse_sexp(form[1])
     args = [parse_sexp(f) for f in form[2:end]]
     Expr(:call, head, args...)
+end
+
+"""
+Parse
+
+    (@f <args...>)
+
+into
+
+    @f(<args...>)
+
+"""
+function parse_macrocall(form::Vector)
+    @assert kind(form[1]) === AT_SIGN
+    @assert length(form) > 1
+    head = Symbol(string(value.(form[1:2])...))
+    args = parse_sexp.(form[3:end])
+    # LineNumberNode is required for correct parsing
+    e = Expr(:macrocall, head, LineNumberNode(1, :none), args...)
+    @show head args e
+    e
 end
 
 """
